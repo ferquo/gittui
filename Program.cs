@@ -188,7 +188,7 @@ internal sealed class GitDashboardWindow : Window
         _pullButton.Accepting += (_, args) =>
         {
             args.Cancel = true;
-            RunGitOperation("Pulling latest changes", () => _git.Pull(), refreshAfter: true);
+            PullChanges();
         };
         topBar.Add(_pullButton);
 
@@ -202,7 +202,7 @@ internal sealed class GitDashboardWindow : Window
         _pushButton.Accepting += (_, args) =>
         {
             args.Cancel = true;
-            RunGitOperation("Pushing changes", () => _git.Push(), refreshAfter: true);
+            PushChanges();
         };
         topBar.Add(_pushButton);
 
@@ -348,6 +348,8 @@ internal sealed class GitDashboardWindow : Window
             new Shortcut(Key.S.WithCtrl, "Stage", StageSelection),
             new Shortcut(Key.U.WithCtrl, "Unstage", UnstageSelection),
             new Shortcut(Key.Enter.WithCtrl, "Commit", OpenCommitDialog),
+            new Shortcut(Key.L.WithCtrl, "Pull", PullChanges),
+            new Shortcut(Key.P.WithCtrl, "Push", PushChanges),
             new Shortcut(Key.T.WithCtrl, "Toggle timer", ToggleAutoRefresh)
         };
         return new StatusBar(items);
@@ -698,6 +700,16 @@ internal sealed class GitDashboardWindow : Window
         }
 
         RunGitOperation($"Unstaging {paths.Count} file(s)", () => _git.Unstage(paths), refreshAfter: true);
+    }
+
+    private void PullChanges()
+    {
+        RunGitOperation("Pulling latest changes", () => _git.Pull(), refreshAfter: true);
+    }
+
+    private void PushChanges()
+    {
+        RunGitOperation("Pushing changes", () => _git.Push(), refreshAfter: true);
     }
 
     private void CheckoutBranch(string branchName)
