@@ -1,0 +1,30 @@
+{
+  "name": "@ferquo/gittui",
+  "version": "1.0.0",
+  "description": "A terminal-based user interface for Git",
+  "bin": {
+    "gittui": "index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferquo/gittui.git"
+  },
+  "keywords": [
+    "git",
+    "tui",
+    "terminal",
+    "gui",
+    "dotnet"
+  ],
+  "author": "Ferenc Pato",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "index.js",
+    "LICENSE",
+    "README.md"
+  ]
+}

@@ -1,0 +1,51 @@
+name: Publish to NPM
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Build for Windows
+        run: dotnet publish gittui/gittui.csproj -c Release -r win-x64 /p:PublishSingleFile=true /p:PublishTrimmed=true --self-contained -o build/win-x64
+
+      - name: Build for Linux
+        run: dotnet publish gittui/gittui.csproj -c Release -r linux-x64 /p:PublishSingleFile=true /p:PublishTrimmed=true --self-contained -o build/linux-x64
+
+      - name: Build for macOS (Intel)
+        run: dotnet publish gittui/gittui.csproj -c Release -r osx-x64 /p:PublishSingleFile=true /p:PublishTrimmed=true --self-contained -o build/osx-x64
+
+      - name: Build for macOS (Apple Silicon)
+        run: dotnet publish gittui/gittui.csproj -c Release -r osx-arm64 /p:PublishSingleFile=true /p:PublishTrimmed=true --self-contained -o build/osx-arm64
+
+      - name: Prepare Distribution
+        run: |
+          mkdir -p dist
+          mv build/win-x64/gittui.exe dist/gittui-win.exe
+          mv build/linux-x64/gittui dist/gittui-linux
+          mv build/osx-x64/gittui dist/gittui-osx-x64
+          mv build/osx-arm64/gittui dist/gittui-osx-arm64
+          chmod +x dist/gittui-linux dist/gittui-osx-x64 dist/gittui-osx-arm64
+
+      - name: Publish to NPM
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
