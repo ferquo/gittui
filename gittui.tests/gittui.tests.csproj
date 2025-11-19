@@ -18,7 +18,7 @@
 
 
   <ItemGroup>
-    <ProjectReference Include="..\gittui.csproj" />
+    <ProjectReference Include="..\gittui\gittui.csproj" />
   </ItemGroup>
 
 </Project>

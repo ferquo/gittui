@@ -2,8 +2,9 @@ using gittui.Abstractions;
 using gittui.Logic;
 using gittui.Models;
 using Moq;
+using Xunit;
 
-namespace gittui.gittui.tests;
+namespace gittui.Tests;
 
 public class GitFacadeTests
 {
