@@ -28,7 +28,7 @@ public class GitFacadeTests
                            ?? file2.txt
 
                            """;
-        _mockRunner.Setup(r => r.Run(RepoPath, "status", "--short", "--branch"))
+        _mockRunner.Setup(r => r.Run(RepoPath, "status", "--short", "--branch", "-uall"))
             .Returns(new GitCommandResult(0, statusOutput, ""));
 
         var branchesOutput = """
@@ -72,11 +72,55 @@ public class GitFacadeTests
     public void LoadSnapshot_ThrowsException_WhenStatusFails()
     {
         // Arrange
-        _mockRunner.Setup(r => r.Run(RepoPath, "status", "--short", "--branch"))
+        _mockRunner.Setup(r => r.Run(RepoPath, "status", "--short", "--branch", "-uall"))
             .Returns(new GitCommandResult(1, "", "fatal: not a git repository"));
 
         // Act & Assert
         var ex = Assert.Throws<GitCommandException>(() => _facade.LoadSnapshot());
         Assert.Contains("Unable to read git status", ex.Message);
+    }
+
+
+    [Fact]
+    public void LoadSnapshot_ReturnsIndividualFiles_ForUntrackedDirectories()
+    {
+        // Arrange
+        var statusOutput = """
+                           ## main
+                           ?? newfolder/file1.txt
+                           ?? newfolder/file2.txt
+                           
+                           """;
+        _mockRunner.Setup(r => r.Run(RepoPath, "status", "--short", "--branch", "-uall"))
+            .Returns(new GitCommandResult(0, statusOutput, ""));
+
+        var branchesOutput = "main\n";
+        _mockRunner.Setup(r => r.Run(RepoPath, "for-each-ref", "--format=%(refname:short)", "refs/heads"))
+            .Returns(new GitCommandResult(0, branchesOutput, ""));
+
+        // Act
+        var snapshot = _facade.LoadSnapshot();
+
+        // Assert
+        Assert.Equal(2, snapshot.UnstagedChanges.Count);
+        Assert.Contains(snapshot.UnstagedChanges, c => c.Path == "newfolder/file1.txt");
+        Assert.Contains(snapshot.UnstagedChanges, c => c.Path == "newfolder/file2.txt");
+    }
+    [Fact]
+    public void GetDiff_ReturnsDiff_ForUntrackedFile()
+    {
+        // Arrange
+        var path = "newfile.txt";
+        var diffOutput = "diff --git a/newfile.txt b/newfile.txt\nnew file mode 100644\nindex 0000000..e69de29\n";
+        
+        // Mock the specific call for untracked file diff
+        _mockRunner.Setup(r => r.Run(RepoPath, "diff", "--no-index", "--", "/dev/null", path))
+            .Returns(new GitCommandResult(1, diffOutput, "")); // Exit code 1 is expected for diffs found
+
+        // Act
+        var result = _facade.GetDiff(path, DiffScope.WorkingTree, isUntracked: true);
+
+        // Assert
+        Assert.Equal(diffOutput, result);
     }
 }

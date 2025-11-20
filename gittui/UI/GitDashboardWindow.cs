@@ -49,6 +49,7 @@ internal sealed class GitDashboardWindow : Window
     private DateTimeOffset _lastRefresh = DateTimeOffset.MinValue;
     private SelectionContext _selectionContext = SelectionContext.None;
     private string? _lastSelectedPath;
+    private bool _isUpdatingSelection;
 
     public GitDashboardWindow(string repositoryPath)
     {
@@ -244,7 +245,34 @@ internal sealed class GitDashboardWindow : Window
             AllowsMultipleSelection = true
         };
         _stagedList.SetSource<string>(_stagedDisplay);
-        _stagedList.SelectedItemChanged += (_, __) => UpdateDiffPane();
+        _stagedList.SelectedItemChanged += (_, __) =>
+        {
+            if (_isUpdatingSelection) return;
+
+            try
+            {
+                _isUpdatingSelection = true;
+                if (_stagedList.SelectedItem != -1)
+                {
+                    if (_unstagedList.Source?.Count > 0 && _unstagedList.SelectedItem != -1)
+                    {
+                        try
+                        {
+                            _unstagedList.SelectedItem = -1;
+                        }
+                        catch (ArgumentOutOfRangeException)
+                        {
+                            // Ignore internal Terminal.Gui error
+                        }
+                    }
+                }
+                UpdateDiffPane();
+            }
+            finally
+            {
+                _isUpdatingSelection = false;
+            }
+        };
         stagedFrame.Add(_stagedList);
 
         _unstageButton = new Button
@@ -281,7 +309,34 @@ internal sealed class GitDashboardWindow : Window
             AllowsMultipleSelection = true
         };
         _unstagedList.SetSource<string>(_unstagedDisplay);
-        _unstagedList.SelectedItemChanged += (_, __) => UpdateDiffPane();
+        _unstagedList.SelectedItemChanged += (_, __) =>
+        {
+            if (_isUpdatingSelection) return;
+
+            try
+            {
+                _isUpdatingSelection = true;
+                if (_unstagedList.SelectedItem != -1)
+                {
+                    if (_stagedList.Source?.Count > 0 && _stagedList.SelectedItem != -1)
+                    {
+                        try
+                        {
+                            _stagedList.SelectedItem = -1;
+                        }
+                        catch (ArgumentOutOfRangeException)
+                        {
+                            // Ignore internal Terminal.Gui error
+                        }
+                    }
+                }
+                UpdateDiffPane();
+            }
+            finally
+            {
+                _isUpdatingSelection = false;
+            }
+        };
         unstagedFrame.Add(_unstagedList);
 
         _stageButton = new Button
@@ -355,14 +410,19 @@ internal sealed class GitDashboardWindow : Window
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && _autoRefreshToken is not null)
+        if (disposing)
         {
-            Application.RemoveTimeout(_autoRefreshToken);
-            _autoRefreshToken = null;
+            if (_autoRefreshToken is not null)
+            {
+                Application.RemoveTimeout(_autoRefreshToken);
+                _autoRefreshToken = null;
+            }
         }
 
         base.Dispose(disposing);
     }
+
+
 
     private void ToggleAutoRefresh()
     {
@@ -435,7 +495,8 @@ internal sealed class GitDashboardWindow : Window
     {
         var staged = change.StagedCode == '\0' ? ' ' : change.StagedCode;
         var worktree = change.WorkTreeCode == '\0' ? ' ' : change.WorkTreeCode;
-        return $"[{staged}{worktree}] {change.Path}";
+        var formattedPath = PathFormatter.FormatGitStatusPath(change.Path);
+        return $"[{staged}{worktree}] {formattedPath}";
     }
 
     private void UpdateListViewMarks(ListView listView, int count)
@@ -459,27 +520,21 @@ internal sealed class GitDashboardWindow : Window
         }
 
         var (selection, scope) = GetActiveSelection();
-        if (selection.Count == 0)
+        if (selection is null)
         {
             _diffCaption.Text = "Select a file to preview its diff.";
             ShowDiffMessage("No file selected.");
             return;
         }
 
-        if (selection.Count > 1)
-        {
-            _diffCaption.Text = "Multiple files selected. Choose a single file to preview the diff.";
-            ShowDiffMessage("Multiple files selected.");
-            return;
-        }
-
-        var target = selection[0];
+        var target = selection.Value;
         _diffCaption.Text = $"{target.Path}";
         _lastSelectedPath = target.Path;
 
         try
         {
-            var diff = _git.GetDiff(target.Path, scope);
+            var isUntracked = target.WorkTreeCode == '?';
+            var diff = _git.GetDiff(target.Path, scope, isUntracked);
             RenderDiff(diff);
         }
         catch (Exception ex)
@@ -982,46 +1037,51 @@ internal sealed class GitDashboardWindow : Window
         _refreshLabel.Text = $"Auto-refresh: {state} (30s) · Last: {timestamp}";
     }
 
-    private (List<GitFileChange> selection, DiffScope scope) GetActiveSelection()
+    private (GitFileChange? selection, DiffScope scope) GetActiveSelection()
     {
-        var stagedSelection = GetSelectedChanges(_stagedList, _stagedChanges);
-        var unstagedSelection = GetSelectedChanges(_unstagedList, _unstagedChanges);
-
-        if (_stagedList.HasFocus && stagedSelection.Count > 0)
+        // 1. Priority: Focused list with valid selection
+        if (_stagedList.HasFocus && IsValidSelection(_stagedList, _stagedChanges))
         {
             _selectionContext = SelectionContext.Staged;
-            return (stagedSelection, DiffScope.Staged);
+            return (_stagedChanges[_stagedList.SelectedItem], DiffScope.Staged);
         }
 
-        if (_unstagedList.HasFocus && unstagedSelection.Count > 0)
+        if (_unstagedList.HasFocus && IsValidSelection(_unstagedList, _unstagedChanges))
         {
             _selectionContext = SelectionContext.Unstaged;
-            return (unstagedSelection, DiffScope.WorkingTree);
+            return (_unstagedChanges[_unstagedList.SelectedItem], DiffScope.WorkingTree);
         }
 
-        if (_selectionContext == SelectionContext.Staged && stagedSelection.Count > 0)
+        // 2. Priority: Last active context with valid selection
+        if (_selectionContext == SelectionContext.Staged && IsValidSelection(_stagedList, _stagedChanges))
         {
-            return (stagedSelection, DiffScope.Staged);
+            return (_stagedChanges[_stagedList.SelectedItem], DiffScope.Staged);
         }
 
-        if (_selectionContext == SelectionContext.Unstaged && unstagedSelection.Count > 0)
+        if (_selectionContext == SelectionContext.Unstaged && IsValidSelection(_unstagedList, _unstagedChanges))
         {
-            return (unstagedSelection, DiffScope.WorkingTree);
+            return (_unstagedChanges[_unstagedList.SelectedItem], DiffScope.WorkingTree);
         }
 
-        if (stagedSelection.Count > 0)
+        // 3. Priority: Any list with valid selection (Staged first)
+        if (IsValidSelection(_stagedList, _stagedChanges))
         {
             _selectionContext = SelectionContext.Staged;
-            return (stagedSelection, DiffScope.Staged);
+            return (_stagedChanges[_stagedList.SelectedItem], DiffScope.Staged);
         }
 
-        if (unstagedSelection.Count > 0)
+        if (IsValidSelection(_unstagedList, _unstagedChanges))
         {
             _selectionContext = SelectionContext.Unstaged;
-            return (unstagedSelection, DiffScope.WorkingTree);
+            return (_unstagedChanges[_unstagedList.SelectedItem], DiffScope.WorkingTree);
         }
 
-        return (new List<GitFileChange>(), DiffScope.WorkingTree);
+        return (null, DiffScope.WorkingTree);
+    }
+
+    private static bool IsValidSelection(ListView list, List<GitFileChange> backing)
+    {
+        return list.SelectedItem >= 0 && list.SelectedItem < backing.Count;
     }
 
     private List<GitFileChange> GetSelectedChanges(ListView listView, List<GitFileChange> backing)

@@ -22,7 +22,7 @@ internal sealed class GitFacade
     public RepoSnapshot LoadSnapshot()
     {
         var rootName = Path.GetFileName(_repositoryPath.TrimEnd(Path.DirectorySeparatorChar));
-        var statusResult = RunGit("status", "--short", "--branch");
+        var statusResult = RunGit("status", "--short", "--branch", "-uall");
         if (!statusResult.Success)
         {
             throw new GitCommandException("Unable to read git status.", statusResult);
@@ -165,10 +165,15 @@ internal sealed class GitFacade
         }
     }
 
-    public string GetDiff(string path, DiffScope scope)
+    public string GetDiff(string path, DiffScope scope, bool isUntracked = false)
     {
         GitCommandResult result;
-        if (scope == DiffScope.Staged)
+        if (isUntracked)
+        {
+            // Use --no-index to diff against /dev/null (empty) to show the full file content as added
+            result = RunGit("diff", "--no-index", "--", "/dev/null", path);
+        }
+        else if (scope == DiffScope.Staged)
         {
             result = RunGit("diff", "--cached", "--", path);
         }
@@ -177,9 +182,34 @@ internal sealed class GitFacade
             result = RunGit("diff", "--", path);
         }
 
-        if (!result.Success)
+        // git diff --no-index returns 1 if there are differences, which is expected here.
+        // But RunGit might throw if exit code is not 0? Let's check RunGit implementation.
+        // RunGit returns GitCommandResult, checking Success property.
+        // Standard git diff also returns 1 if diffs are found.
+        // We need to ensure RunGit doesn't treat exit code 1 as failure for diff commands if we want to be safe,
+        // OR we just handle it here.
+        // However, looking at existing code:
+        // if (!result.Success) { throw ... }
+        // This implies RunGit considers exit code 1 as failure?
+        // Let's check GitCommandRunner or how RunGit is implemented.
+        // Wait, standard `git diff` returns 1 if differences are found.
+        // If existing code works, then `RunGit` or `_commandRunner` must be handling this, or `git diff` behaves differently than I recall in this context?
+        // Actually `git diff` *does* return 1 if differences are found.
+        // Let's assume the existing infrastructure handles it or I should check `GitCommandRunner`.
+        // But for now, let's stick to the pattern.
+        
+        // Correction: `git diff` without --exit-code (default) returns 0 even if there are diffs.
+        // `git diff --no-index` DOES return 1 if there are differences.
+        // So we might need to handle that.
+        
+        if (!result.Success && !isUntracked) 
         {
-            throw new GitCommandException("Failed to calculate diff.", result);
+             throw new GitCommandException("Failed to calculate diff.", result);
+        }
+        else if (isUntracked && result.ExitCode != 0 && result.ExitCode != 1)
+        {
+             // For no-index, 0 = no diff, 1 = diff found. Anything else is error.
+             throw new GitCommandException("Failed to calculate diff.", result);
         }
 
         if (string.IsNullOrWhiteSpace(result.Stdout))
