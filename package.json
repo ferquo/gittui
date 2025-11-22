@@ -1,6 +1,6 @@
 {
   "name": "@ferquo/gittui",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "A terminal-based user interface for Git",
   "bin": {
     "gittui": "index.js"

@@ -889,7 +889,9 @@ internal sealed class GitDashboardWindow : Window
 
         var dialog = new Dialog
         {
-            Title = "Commit staged changes"
+            Title = "Commit staged changes",
+            Width = 60,
+            Height = 14
         };
 
         var infoLabel = new Label
